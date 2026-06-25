@@ -5,8 +5,8 @@ in Machine Learning and AI (Imperial College Business School).
 
 ## Structure
 - Stage 1 (Modules 3–11): skill-building exercises on a chosen practice
-  dataset (Flu Shot Learning, DrivenData) plus the Wine dataset.
-- Stage 2 (Modules 12–24): the graded BBO challenge - submitting queries
+  dataset (Home Credit Default Risk, Kaggle) plus the Wine dataset.
+- Stage 2 (Modules 12–24): the graded BBO challenge — submitting queries
   to hidden functions and improving iteratively.
 
 ## Repo layout
@@ -15,6 +15,6 @@ in Machine Learning and AI (Imperial College Business School).
 - docs/  — datasheet, model card, non-technical write-up
 
 ## Practice dataset (Stage 1)
-Flu Shot Learning (DrivenData): predict H1N1 and seasonal flu vaccine
-uptake from survey data. Binary classification, mild class imbalance,
-scored on ROC-AUC.
+Home Credit Default Risk (Kaggle): predict whether a thin-file loan
+applicant will repay, using application and credit-history data.
+Binary classification, imbalanced (defaults ~8%), scored on ROC-AUC.
