@@ -52,6 +52,13 @@ Balance. Roughly a quarter of queries are exploratory, concentrated where the de
 
 This section is a living record and will be updated as the approach evolves.
 
+5. Documentation
+
+- Datasheet for the query data set (motivation, composition, collection, uses, maintenance): [docs/datasheet.md](docs/datasheet.md)
+- Model card for the optimisation approach (intended use, evaluation, assumptions, failure modes): [docs/model_card.md](docs/model_card.md)
+
+Both follow the frameworks from Module 21 (Gebru et al., Datasheets for Datasets; Mitchell et al., Model Cards for Model Reporting) and are updated after each round.
+
 Repo layout
 stage1/              practice notebooks and reflections
   reflections/       Stage 1 discussion write-ups
