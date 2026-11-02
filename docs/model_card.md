@@ -1,74 +1,60 @@
-# Model Card: BBO Capstone Optimiser
+# Model Card: BBO capstone optimiser
 
-Following the simplified model card template from Mini-lesson 21.2 (Mitchell et al., Model Cards for Model Reporting). Final version, after round 13 (Module 25, October 2026).
+This card follows the Module 25 model card template (Model Description, Performance, Limitations, Trade-offs) and finalises the card I wrote for component 21.2. The "model" is the decision procedure I used to choose one query per week for each of eight unknown functions over thirteen rounds. It has a Gaussian process at its centre, but it is a procedure with a model inside it rather than a single model, and the record of which part made each decision is in `stage2/query_log.csv`. Final version, after round 13.
 
-## 1. Model overview
+## Model Description
 
-**Name.** BBO Capstone Optimiser: Gaussian process with expected improvement, SVM feasibility filter, decision committee.
+**Input:** For each function, all evaluations so far: the course-supplied starting points (10 to 40 per function) plus my own queries (13 per function by the end). Each evaluation is an input vector in [0, 1]^d, with d from 2 to 8, and the scalar output the portal returned. The functions are modelled separately and nothing is shared between them.
 
-**Version.** 3.1, final. Version 1 (rounds 1 to 3) was a plain GP with expected improvement, with a log transform on skewed outputs and a noise term on noisy ones. Version 2 (rounds 4 to 7) added the SVM filter, the repeat-last-step candidate and structural hypotheses from the function descriptions. Version 3 (rounds 8 to 13) added the multi-seed refit check, the margin test and the rule that a function which beats the forecast twice loses its model vote. Round 13 was a certification round.
+**Output:** One query per function per round, as a vector in [0, 1]^d formatted to six decimal places, together with a predicted value at that point and a tag recording what chose it. The only thing the challenge scores is the output value the portal returns for the final submitted query; everything else exists to choose that query well.
 
-**Developer.** Vugar Nasibov, Imperial College Business School ML and AI Professional Certificate. Contact via the GitHub repository.
+**Model Architecture:** Three layers.
 
-**Licence.** MIT (see `LICENSE`).
+1. Surrogate. A Gaussian process per function with a Matern 2.5 kernel and one length-scale per input dimension, fitted by maximum marginal likelihood with several restarts, outputs standardised. Variants by function: fitted on log(y) where outputs are skewed (functions 1, 5, 7); a fitted white-noise term where readings are noisy (functions 2, 3); tightened length-scale bounds where the default bounds smoothed away a sharp feature (function 4).
+2. Acquisition. Expected improvement, maximised from 30 to 40 random starts with L-BFGS-B. On function 8 the search is restricted to the region a linear SVM classifies as belonging to the top third of results (the fence). On functions where the GP had stalled, the GP's mean is maximised inside a small box around the best point instead of EI over the whole domain.
+3. Control. Before a proposal is submitted it must be stable across five random seeds and its predicted gain over the best point must be clearly positive. If either test fails, the function gets a deliberate decision: the choice of a model committee (ridge, nearest neighbours, random forest, gradient boosting, a small neural network, compared by five-fold cross-validation), a step read from the measured values near the best point, or a designed exploration of an unsampled region. Every forecast and outcome is recorded, and a model whose forecasts miss repeatedly on a function loses its authority on that function.
 
-**Description.** A sequential optimiser that chose one query per week for each of eight unknown functions. It fits a surrogate to all past evaluations, proposes the point with highest expected improvement, checks that proposal against a structural candidate and a stability test, and submits the survivor. It is not a single model but a decision procedure with a model inside it, and the record of which part made each decision is in the query log.
+Software: scikit-learn (GaussianProcessRegressor, SVC, the committee models), NumPy, SciPy, Matplotlib. The complete code is `stage2/bbo_weekly_analysis.ipynb`.
 
-## 2. Intended use
+## Performance
 
-**Primary task.** Maximising an expensive, gradient-free, low-dimensional (2 to 8) black-box function under a fixed budget of one evaluation per round, with delayed feedback.
+**How performance is measured.** Two ways. The challenge's own measure is the output value per function, with the final submitted query counting for the leaderboard. My internal measure is calibration: the gap between what the surrogate predicted at a query and what came back, tracked per function, which decides how much the model is trusted next round. Both are computed on the full query history in the notebook; the figure below is its final cell.
 
-**Target users.** Me, for the capstone; peers and facilitators reviewing the approach; anyone facing the same shape of problem (hyperparameter tuning, experimental design, process optimisation) who wants a documented worked example.
+![Best value found per function by round](best_so_far.png)
 
-**Recommended use cases.** Budgets of tens of evaluations. Continuous inputs on a bounded box. Outputs that are deterministic or have modest, roughly constant noise. Settings where a wrong query costs a round but not a person.
+**Results on the eight functions.** Best value found over thirteen rounds, against the best in the starting data, and the value of the final submission, which is what the leaderboard uses.
 
-**Not recommended for.** High-dimensional problems (above roughly 10 inputs) where a GP on this few points cannot fit. Categorical or mixed inputs. Heavy heteroscedastic noise. Any setting where the query itself has real-world consequences, since the exploration budget deliberately spends some queries on points expected to be poor.
+| Fn | Dim | Starting best | Best found | Round | Final submission | What chose the best query |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 7.7e-16 | 1.998 | 12 | 1.998 | measured parabola through the last three readings on the log scale |
+| 2 | 2 | 0.611 | 0.643 | 1 | 0.641 | GP with expected improvement; never beaten, noise of about 0.05 exceeded any predicted gain |
+| 3 | 3 | -0.035 | -0.0089 | 11 | -0.024 | GP mean maximised in a local box; the function is noisy and the repeat came back lower |
+| 4 | 4 | -4.03 | 0.682 | 4 | 0.682 | GP with expected improvement |
+| 5 | 4 | 1,089 | 8,662 | 9 | 8,662 | following the measured ridge along x1 to the corner after the models predicted a fall |
+| 6 | 5 | -0.714 | -0.203 | 12 | -0.343 | GP mean maximised in a local box; the round 13 step from the same model missed |
+| 7 | 6 | 1.365 | 3.162 | 12 | 3.098 | GP mean maximised in a local box, after a hand step moved x1 off its edge in round 11 |
+| 8 | 8 | 9.598 | 9.983 | 12 | 9.983 | GP with expected improvement, three consecutive forecasts within 0.003 |
 
-## 3. Training data
+Every function's best found is above its starting best. All eight final submissions are above the starting best too, although three of them (functions 2, 6, 7) are below the best found because I took a model-backed step in the last round rather than resubmitting.
 
-**Sources.** The query data set documented in `docs/datasheet.md`: 175 course-supplied starting points plus 104 of my own over thirteen rounds, one row per evaluation.
+**Which part of the procedure produced the gains.** Of the 104 queries, 61 were chosen by a model (39 GP, 8 GP on log outputs, 5 SVM-fenced GP, 9 committee), 18 by a step read from the measured values, 17 were deliberate explorations, 3 came from structural hypotheses drawn from the function descriptions and 5 were repeats of the best input. Of the 40 queries that produced a new best, 32 were model-chosen (19 GP, 7 GP on log outputs, 4 SVM-fenced, 2 committee), 7 came from measured steps and 1 from a structural hypothesis. No exploration query and no repeat produced a new best directly; exploration paid through what it told the next round. An audit after round 4 gave the same picture (model proposals 9 for 13, my own hypotheses 3 for 9) and is why the model became the default.
 
-**Size per function.** 23 to 53 points; see the datasheet table.
+**Calibration.** The surrogate's forecasts were reliable on functions 5 (log scale) and 8, acceptable on 1, 6 and 7, and poor on 3 and 4. On function 4 the GP predicted 0.85 and 0.71 for queries that returned 0.40 and 0.63; on function 3 its cross-validated R2 was below zero for most of the challenge. Those are the functions where the committee and the measured steps took over. The five-fold cross-validated R2 of the GP on the final data is -0.84, -1.04, -0.14, 0.67, 0.80, 0.63, 0.75 and 0.98 for functions 1 to 8; the negative values on functions 1 and 2 reflect a surface with one sharp feature (function 1) and noise larger than the signal within the crest (function 2), which is why those two were searched by measurement rather than by the model.
 
-**Preprocessing.** Log transform of outputs for the skewed functions (1, 5 and 7); a fitted noise term for the noisy function (2); no input scaling. The SVM filter is trained on a binary label, top third of results against the rest, recomputed each round.
+## Limitations
 
-**Modalities.** Numeric vectors and scalars only.
+- The surrogate assumes a surface smooth enough for a Matern kernel to interpolate. That was false for function 1 on the raw scale (fixed by the log transform) and for function 4 at the scale of the spike (never fixed; the GP over-predicted its neighbourhood twice).
+- It assumes the noise, where present, is roughly constant across the domain, and it was fitted on few points: my early noise estimate for function 2 was ten times too small, and function 3's noise only became visible with the round 13 repeat.
+- It assumes the maximum lies inside the box. Function 5's maximum is the corner, and the procedure found it through measured readings that contradicted the model, not through the model.
+- It cannot see beyond its data. On function 6 both the GP and the committee placed their optimum inside the one basin I had sampled, while a peer's result shows a better basin exists. On function 7 every model proposal left the first input at zero for ten rounds because nothing had ever moved it.
+- The decision tags in the query log were reconstructed in Module 25 from my weekly reflections and decision notes, not written at the time, so they are a faithful summary rather than a transcript.
+- One evaluation per function per week, no batch queries, no gradients, and results delayed until later in the week. The procedure was never tested under any other regime.
+- The structural hypotheses and the judgement calls between a model proposal and a measured step are documented in the weekly reflections on the course platform and summarised in the Module 25 retrospective, but they are not reproducible from the code alone.
 
-## 4. Evaluation metrics
+## Trade-offs
 
-**Metrics used.** Best value found per function, and its improvement over the course-supplied starting best. Leave-one-out cross-validated R² of the surrogate per function, re-run every round. Cross-validated accuracy of the SVM filter. Predicted margin of the proposed point over the incumbent, used as a gate: proposals with thin or negative margin are discarded. Stability: whether a proposal survives refitting across several random seeds. Prediction error (forecast minus outcome) logged for every query, with two errors in the same direction removing the model's vote on that function.
-
-**Final results.** All eight functions ended above their starting best. Five produced a new best in the final three rounds.
-
-| Fn | Starting best | Round 1 | After round 10 | Final best (round) | How it ended |
-|---|---|---|---|---|---|
-| 1 | 7.7 × 10⁻¹⁶ | 3.2 × 10⁻²⁴¹ | 1.980 | 1.998 (12) | Invisible on a raw scale; once fitted on log y it became a 200-order-of-magnitude ridge. Searched by bracketing along measured lines; gains came from the trend, not the acquisition function. Round 13 repeat returned the identical value: deterministic. |
-| 2 | 0.611 | 0.643 | 0.643 | 0.643 (1) | New best in round 1 and never beaten. From round 5 the fitted noise exceeded any predicted gain, so later queries certified the incumbent or probed elsewhere; the round 13 probe at (0.70, 0.96) returned 0.641, within noise. |
-| 3 | −0.035 | −0.093 | −0.0135 | −0.0089 (11) | Below the starting best in round 1. Structural hypothesis (balance between the three doses) chose every new best. The round 13 repeat of the round 11 query returned −0.024, so the function is noisy and the best is partly luck. |
-| 4 | −4.03 | −1.98 | 0.682 | 0.682 (4) | Large gains in rounds 1, 3 and 4, model-led; diminishing returns after. Round 13 repeat of the round 4 query returned the identical value: deterministic. |
-| 5 | 1,089 | 1,389 | 8,662 | 8,662 (9) | The log transform turned an apparently signal-less surface into the largest gain of the project. In rounds 7 and 8 a probe along one axis, which three model families predicted would decline, returned higher values; the model lost its vote and the measured trend led to the corner of the box in round 9. Rounds 10 to 12 tested each face near the corner; all lower. Round 13 repeat: identical, deterministic. |
-| 6 | −0.714 | −0.539 | −0.238 | −0.203 (12) | Stuck in one corner until round 6; model-led gains once conditioned on the full history, with new bests in rounds 11 and 12. Round 13 came back lower. |
-| 7 | 1.365 | 1.762 | 2.571 | 3.162 (12) | Every query to round 10 held the first input at 0 because the surrogate rated the edge. Moving it to 0.1 (round 11) and 0.2 (round 12) produced the two largest late gains; 0.3 in round 13 came back lower, so the ridge had turned. |
-| 8 | 9.598 | 9.864 | 9.972 | 9.983 (12) | No surrogate could predict it at 40 points, so the SVM filter fenced off the good region. From round 8 the GP validated and chose rounds 10 to 12, each a new best. Round 13 repeat: identical, deterministic. |
-
-Of the 104 queries, the surrogate chose 47, a measured trend 20, deliberate exploration 19, a structural hypothesis 8, the SVM fence 5, and 5 were repeats. Of the 40 queries that produced a new best, the surrogate chose 16, a measured trend 14, the SVM fence 4, a structural hypothesis 4 and the log-fitted surrogate 2. No exploration query and no repeat produced a new best directly, which is the expected shape: exploration pays through what it tells the next round. The notebook reproduces both counts.
-
-**Fairness or bias checks.** No human groups are involved. The relevant bias is sampling bias: queries cluster where the model already expects good values, so the surrogate's confidence outside those clusters is unearned. This was checked by tagging exploratory queries, refusing to trust flat regions with fewer than a handful of points, and from round 11 placing the exploration query in the least-sampled quadrant rather than at the model's highest-variance point.
-
-## 5. Assumptions and limitations
-
-**Assumptions.** That each function is smooth enough for a Matern 2.5 kernel to interpolate, which was untrue for function 1 without the log transform. That noise, where present, is roughly constant across the domain. That the maximum lies inside the box rather than on its boundary, which was false for function 5. That last round's cross-validation verdict on a surrogate still holds this round, which round 8 showed to be false for function 8 in the good direction and round 13 showed to be optimistic for function 3.
-
-**Constraints.** One evaluation per function per week, results delayed until later in the week, no gradients, no batch queries, and no way to re-query the same point cheaply.
-
-**Failure modes.** A confident surrogate mean in an unsampled region (the GP's version of a hallucination), which the multi-seed refit and margin test are designed to catch. Length-scales that flip with one added point on the higher-dimensional functions. Proposals stuck on the domain edge, which cost function 7 ten rounds. Declaring a function finished when the good region has simply not been found yet; functions 5 and 6 both did this to me. And the opposite: a single lucky reading on a noisy function (function 3, round 11) taken as a real best.
-
-## 6. Ethical considerations and life cycle
-
-**Transparency and reproducibility.** Every query carries a tag saying what decided it, the notebook re-derives every model from the history, and the history can be truncated to any round to replay the decision with the data available at the time. The parts that are not reproducible from the code are the structural hypotheses I drew from the function descriptions and the judgement calls when the model and the structural candidate disagreed; those are written up in the weekly reflections on the course platform and summarised in the Module 25 retrospective. The decision tags were reconstructed from those reflections in Module 25 rather than logged live; this is the one place where the record is a summary rather than a transcript.
-
-**Adaptation.** The pipeline transfers to any bounded low-dimensional black box by changing the data folder and the dimension list. What does not transfer automatically is the per-function configuration (transform, noise term, filter on or off), which has to be re-derived from the new problem's early data.
-
-**Monitoring plan.** Cross-validation re-run every round; any surrogate whose LOO R² fell was demoted to the committee vote rather than the sole decider. Best-so-far tracked per function so that a round with no gain was visible immediately. The challenge is complete; no further monitoring.
-
-**Repository.** `github.com/vugarnv/Capstone`. Final version, Module 25, October 2026.
+- Exploration against exploitation. Seventeen of 104 queries were deliberate explorations. None produced a new best directly, and some cost a round on a function that was already near its ceiling (function 2 spent six). The same budget placed near the best points would have added small gains; the explorations found the x1 ridge on function 5 and ruled out the high-x2, high-x3 region on function 7. I kept the split because a discovery is worth more than a refinement while rounds remain, and dropped exploration for the last two rounds.
+- Model authority against measurement. Following the model gave the larger share of gains and the steadier calibration; following the measured readings found the two results the model could not (function 5's corner, function 7's x1 axis). Giving the model the default and overriding only when its forecasts missed was the compromise; it cost me on function 5, where I believed the model's interior optimum for two rounds longer than the readings justified.
+- Last-round risk. Under a scoring rule that counts only the final submission, resubmitting the best known input locks in the result and a model step risks it. I locked five functions and stepped on three where peers had shown a better value existed. All three steps came back below the best (by 0.002, 0.14 and 0.06). In hindsight the right final-round policy for this scoring rule is to resubmit everywhere.
+- Simplicity against power. A single scikit-learn GP per function was easy to inspect, refit across seeds and compare with other model families in one API, which is what made the control layer possible. A dedicated Bayesian optimisation library would have given better acquisition optimisation in eight dimensions and a trust-region method out of the box; at a few dozen points per function the difference did not justify the extra dependency, but it would above ten dimensions or a few hundred points.
+- Smoothness against sharpness. Default length-scale bounds let the GP explain function 4's spike by averaging it away; tightening the bounds restored the spike but made the fit unstable elsewhere. I used the sharper fit only for local steps and the committee as a check, which is slower and more manual than a single setting.
